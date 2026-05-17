@@ -150,7 +150,11 @@ class MultiQueryManager
                 default             => (string) $binding,
             };
 
-            $sql = preg_replace('/\?/', $value, $sql, 1);
+            // use strpos + substr_replace to avoid preg_replace backreference issues
+            $pos = strpos($sql, '?');
+            if ($pos !== false) {
+                $sql = substr_replace($sql, $value, $pos, 1);
+            }
         }
 
         return $sql;

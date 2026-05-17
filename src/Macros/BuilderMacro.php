@@ -8,11 +8,6 @@ use Mojahed\MqResult;
 
 class BuilderMacro
 {
-    /**
-     * Aggregate modes that require SQL rewriting.
-     */
-    private const AGGREGATE_MODES = ['count', 'sum', 'avg', 'min', 'max'];
-
     public static function register(): void
     {
         $macro = function (string $mode = 'get', ?string $column = null) {
@@ -28,54 +23,67 @@ class BuilderMacro
                 $connection = $this->getConnection()->getName();
             }
 
+            // get the underlying query builder (works for both Eloquent and Query builders)
+            $baseQuery = $this instanceof EloquentBuilder ? $this->getQuery() : $this;
+
             // determine SQL based on mode
             $aggregateModes = ['count', 'sum', 'avg', 'min', 'max'];
 
             if (in_array($mode, $aggregateModes)) {
-                // aggregate modes — rewrite SELECT using public API
-                $clone = clone $this;
-                $baseQuery = $clone instanceof EloquentBuilder ? $clone->toBase() : $clone;
+                // aggregate modes — clone and rewrite SELECT
+                $cloned = clone $baseQuery;
 
                 $col = ($mode === 'count') ? '*' : ($column ?? '*');
                 $expression = strtoupper($mode) . '(' . $col . ') as aggregate';
 
-                // use public methods only
-                $baseQuery = $baseQuery->selectRaw($expression)->reorder()->limit(null)->offset(null);
+                $cloned->columns = null;
+                $cloned->orders = null;
+                $cloned->limit = null;
+                $cloned->offset = null;
+                $cloned->selectRaw($expression);
 
-                $sql      = $baseQuery->toSql();
-                $bindings = $baseQuery->getBindings();
+                $sql      = $cloned->toSql();
+                $bindings = $cloned->getBindings();
 
-            } elseif ($mode === 'first' || $mode === 'value') {
-                // first/value — add limit 1
-                $clone = clone $this;
-                $baseQuery = $clone instanceof EloquentBuilder ? $clone->toBase() : $clone;
+            } elseif ($mode === 'first') {
+                // first — just limit 1, keep select as-is
+                $cloned = clone $baseQuery;
+                $cloned->limit = 1;
 
-                if ($mode === 'value' && $column) {
-                    $baseQuery = $baseQuery->select($column);
+                $sql      = $cloned->toSql();
+                $bindings = $cloned->getBindings();
+
+            } elseif ($mode === 'value') {
+                // value — select single column, limit 1
+                $cloned = clone $baseQuery;
+                $cloned->limit = 1;
+                if ($column) {
+                    $cloned->columns = null;
+                    $cloned->select($column);
                 }
 
-                $baseQuery = $baseQuery->limit(1);
-
-                $sql      = $baseQuery->toSql();
-                $bindings = $baseQuery->getBindings();
+                $sql      = $cloned->toSql();
+                $bindings = $cloned->getBindings();
 
             } elseif ($mode === 'exists') {
-                // exists — just limit 1, we check if any row returned
-                $clone = clone $this;
-                $baseQuery = $clone instanceof EloquentBuilder ? $clone->toBase() : $clone;
-                $baseQuery = $baseQuery->select($baseQuery->raw(1))->limit(1);
+                // exists — select 1, limit 1
+                $cloned = clone $baseQuery;
+                $cloned->columns = null;
+                $cloned->orders = null;
+                $cloned->limit = 1;
+                $cloned->selectRaw('1 as `exists`');
 
-                $sql      = $baseQuery->toSql();
-                $bindings = $baseQuery->getBindings();
+                $sql      = $cloned->toSql();
+                $bindings = $cloned->getBindings();
 
             } elseif ($mode === 'pluck' && $column) {
                 // pluck — select only the target column
-                $clone = clone $this;
-                $baseQuery = $clone instanceof EloquentBuilder ? $clone->toBase() : $clone;
-                $baseQuery = $baseQuery->select($column);
+                $cloned = clone $baseQuery;
+                $cloned->columns = null;
+                $cloned->select($column);
 
-                $sql      = $baseQuery->toSql();
-                $bindings = $baseQuery->getBindings();
+                $sql      = $cloned->toSql();
+                $bindings = $cloned->getBindings();
 
             } else {
                 // get (default) — use query as-is
