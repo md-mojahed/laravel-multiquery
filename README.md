@@ -66,15 +66,55 @@ use Mojahed\Facades\MultiQuery;
 ### All Supported Modes
 
 ```php
-[$users, $user, $count, $sum, $avg, $names, $email, $exists] = MultiQuery::run([
+[$users, $user, $count, $sum, $avg, $min, $max, $names, $email, $exists] = MultiQuery::run([
     User::where('active', 1)->mq('get'),             // Collection of Users
-    User::where('id', 1)->mq('first'),               // single User instance
+    User::where('id', 1)->mq('first'),               // single User instance or null
     Order::mq('count'),                              // integer
     Order::mq('sum', 'amount'),                      // float
     Order::mq('avg', 'amount'),                      // float
+    Order::mq('min', 'amount'),                      // mixed (smallest value)
+    Order::mq('max', 'amount'),                      // mixed (largest value)
     User::where('active', 1)->mq('pluck', 'name'),   // ['Mojahed', 'Rahim']
-    User::where('id', 1)->mq('value', 'email'),      // single string
+    User::where('id', 1)->mq('value', 'email'),      // single scalar value
     Order::where('status', 'pending')->mq('exists'), // boolean
+]);
+```
+
+> **Note:** `count`, `sum`, `avg`, `min`, and `max` modes automatically rewrite the query to use the proper SQL aggregate function. You don't need to write `selectRaw('COUNT(*)')` yourself — just pass the mode and column.
+
+### Aggregates with GROUP BY
+
+When using `groupBy`, don't use aggregate modes like `mq('count')` — they rewrite the SELECT and won't give you grouped results. Instead, write the aggregate yourself and use `mq('get')`:
+
+```php
+// ❌ Wrong — mq('count') with groupBy only returns first row
+Order::groupBy('status')->mq('count')
+
+// ✅ Correct — write the aggregate, use mq('get')
+Order::selectRaw('status, COUNT(*) as total')
+    ->groupBy('status')
+    ->mq('get')
+```
+
+This applies to any query where you need grouped aggregates or custom aggregate expressions.
+
+### Eager Loading (with) Not Supported
+
+Eloquent's `with()` eager loading does **not** work with `mq()`. Eager loading fires separate queries behind the scenes after the main query — since `mq()` extracts raw SQL and sends it to the Go binary, Laravel never gets a chance to run those follow-up queries.
+
+```php
+// ❌ Won't load relations — with() is ignored
+User::with('orders')->mq('get')
+
+// ✅ Use join instead
+User::select('users.*', 'orders.amount')
+    ->join('orders', 'orders.user_id', '=', 'users.id')
+    ->mq('get')
+
+// ✅ Or run relations as separate parallel queries
+MultiQuery::run([
+    'users'  => User::mq('get'),
+    'orders' => Order::whereIn('user_id', [1, 2, 3])->mq('get'),
 ]);
 ```
 
@@ -186,6 +226,8 @@ $stats = MultiQuery::run([
     'pending_orders'  => Order::where('status', 'pending')->mq('count'),
     'total_revenue'   => Payment::where('status', 'paid')->mq('sum', 'amount'),
     'today_revenue'   => Payment::whereDate('created_at', today())->mq('sum', 'amount'),
+    'max_order'       => Order::mq('max', 'amount'),
+    'min_order'       => Order::mq('min', 'amount'),
     'recent_orders'   => Order::latest()->take(10)->mq('get'),
     'top_products'    => DB::table('order_items')
                            ->select('product_id', DB::raw('SUM(qty) as sold'))

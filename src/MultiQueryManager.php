@@ -197,12 +197,14 @@ class MultiQueryManager
     ): mixed {
         return match ($mode) {
             'first'  => $this->applyFirst($rows, $modelClass),
-            'count'  => (int) ($rows[0][array_key_first($rows[0] ?? [])] ?? 0),
-            'sum'    => (float) ($rows[0][$column ?? array_key_first($rows[0] ?? [])] ?? 0),
-            'avg'    => (float) ($rows[0][$column ?? array_key_first($rows[0] ?? [])] ?? 0),
+            'count'  => (int) ($rows[0]['aggregate'] ?? 0),
+            'sum'    => (float) ($rows[0]['aggregate'] ?? 0),
+            'avg'    => (float) ($rows[0]['aggregate'] ?? 0),
+            'min'    => $rows[0]['aggregate'] ?? null,
+            'max'    => $rows[0]['aggregate'] ?? null,
             'pluck'  => array_column($rows, $column),
             'value'  => $rows[0][$column] ?? null,
-            'exists' => count($rows) > 0,
+            'exists' => !empty($rows),
             default  => $this->applyGet($rows, $modelClass),  // 'get'
         };
     }
